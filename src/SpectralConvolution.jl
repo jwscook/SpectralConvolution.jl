@@ -1,9 +1,40 @@
 module SpectralConvolution
 
 using LinearAlgebra, FFTW
-export FourierField, hatvalue, reconstruct, convolve, isaxiscontinuous, detectcontinuity
+export FourierField, hatvalue, reconstruct, convolve, isaxiscontinuous, detectcontinuity,
+       isaxisdegenerate, degenerateaxes
 
 fftmodetoindex(m::Integer, N::Integer) = m >= 0 ? m + 1 : N + m + 1
+
+"""
+    isaxisdegenerate(lims, axis)
+
+An axis is DEGENERATE when its lower and upper limits are equal
+(`lims[axis][1] == lims[axis][2]`). This is the mechanism for embedding a
+lower-dimensional field in a higher-dimensional coordinate tuple — e.g. a
+library that always works in `(R, φ, Z)` but, for a given use case, only
+varies in `R` and `Z`: pass `lims = ((Rlo,Rhi), (φ0,φ0), (Zlo,Zhi))` and the
+`φ` axis is treated as fixed rather than spanning a real interval.
+
+Degenerate axes are handled automatically throughout `FourierField`,
+`hatvalue`, `reconstruct`, and `convolve`: they always carry exactly one
+sample, contribute only the zeroth (DC) Fourier mode, and any requested
+`maxshells` entry for that axis is silently clamped to `0`. Positions `x`
+and wavenumbers `k` passed to `reconstruct`/`convolve` still need one entry
+per axis (matching `D`), but the value supplied for a degenerate axis has
+no effect on the result.
+"""
+isaxisdegenerate(lims::NTuple{D,NTuple{2,<:Real}}, axis::Int) where D =
+  lims[axis][1] == lims[axis][2]
+
+"""
+    degenerateaxes(lims)
+
+Returns an `NTuple{D,Bool}` flagging which axes are degenerate, per
+`isaxisdegenerate`.
+"""
+degenerateaxes(lims::NTuple{D,NTuple{2,<:Real}}) where D =
+  ntuple(i -> isaxisdegenerate(lims, i), D)
 
 struct FourierField{D,T,U,A<:AbstractArray{T,D},B<:AbstractArray{<:Complex{T},D}}
   lims::NTuple{D,NTuple{2,T}}
@@ -33,7 +64,7 @@ at a finite sample of points, so it can miss non-continuity that happens
 to coincide at those specific samples.
 """
 function isaxiscontinuous(f::F, lims::NTuple{D,NTuple{2,<:Real}}, axis::Int,
-        NGtest=ntuple(_ -> 8, D); atol=0.0, rtol=sqrt(eps())) where {D,F}
+    NGtest=ntuple(_ -> 8, D); atol=0.0, rtol=sqrt(eps())) where {D,F}
   @assert 1 <= axis <= D
 
   otherpositions = ntuple(D) do i
@@ -98,11 +129,17 @@ FourierField(f::F, lims, NG::Integer; kwargs...) where F =
 function FourierField(f::F, lims, NGs; continuous=detectcontinuity(f, lims, NGs)) where F
   D = length(lims)
   lims = ntuple(i -> (Float64(lims[i][1]), Float64(lims[i][2])), D)
+  degenerate = degenerateaxes(lims)
   NGs = Tuple(NGs)
+  NGs = ntuple(i -> degenerate[i] ? 1 : NGs[i], D)          # exactly one sample on a degenerate axis
   continuous = Tuple(continuous)
+  continuous = ntuple(i -> degenerate[i] ? true : continuous[i], D)  # never reflect/double a degenerate axis
   @assert length(NGs) == D
   @assert length(continuous) == D
-  k0s = ntuple(i -> (continuous[i] ? 2π : π) / (lims[i][2] - lims[i][1]), D)
+  k0s = ntuple(D) do i
+    degenerate[i] && return 0.0   # unused: only mode 0 is ever addressed on a degenerate axis
+    (continuous[i] ? 2π : π) / (lims[i][2] - lims[i][1])
+  end
 
   trueposition = ntuple(D) do i
     lo, hi = lims[i]
@@ -131,6 +168,10 @@ function hatvalue(ff::FourierField{D}, modes::NTuple{D,<:Integer}) where D
   Ls = size(ff.hatvalues)   # ACTUAL (per-axis reflected or not) array length
   idx = ntuple(D) do i
     bin = modes[i]
+    if Ls[i] == 1   # degenerate axis: only the DC mode exists
+      @assert bin == 0 "axis $i is degenerate (zero extent, lims[1]==lims[2]): only mode 0 is defined, got $bin"
+      return 1
+    end
     @assert abs(bin) <= Ls[i] ÷ 2 - 1 "mode $(modes[i]) on axis $i exceeds the representable Nyquist range of $((Ls[i]÷2 - 1))"
     fftmodetoindex(bin, Ls[i])
   end
@@ -143,6 +184,10 @@ end
 
 function convolve(ff::FourierField{D}, g::G, x, k, maxshells;
     atol=0.0, rtol=sqrt(eps())) where {D,G}
+  length(x) == D || error("x must have length $D")
+  length(maxshells) == D || error("maxshells must have length $D")
+  degenerate = degenerateaxes(ff.lims)
+  maxshells = ntuple(i -> degenerate[i] ? 0 : maxshells[i], D)  # a degenerate axis only ever has mode 0
   output = hatvalue(ff, ntuple(_ -> 0, D)) * g(k)
   oldnorm = norm(output)
   for shell in 1:maximum(maxshells)
@@ -162,6 +207,5 @@ function convolve(ff::FourierField{D}, g::G, x, k, maxshells;
   end
   return output
 end
-
 
 end # module SpectralConvolution

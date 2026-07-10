@@ -50,7 +50,7 @@ end
   @test ff_scalar.values == ff_tuple.values
   @test ff_scalar.k0s == ff_tuple.k0s
 end
- 
+
 @testset "continuous dimension: no reflection, true (unhalved) fundamental" begin
   ϕ = 0.3
   fU(x) = sin(2π*x[1] + ϕ) * (0.3 + 0.5*x[2] + 0.2*sin(3*x[2]))
@@ -66,6 +66,39 @@ end
   x = (0.4, 0.6)
   errs = [abs(real(reconstruct(ff, x, (m,m))) - fU(x)) for m in (2,8,20)]
   @test errs[3] < errs[2] < errs[1]
+end
+
+@testset "degenerate axis: R-phi-Z with no phi variation" begin
+  # f only depends on x[1] (R) and x[3] (Z); phi (x[2]) axis is degenerate
+  fU(x) = sin(2π*x[1]) * (0.3 + 0.5*x[3] + 0.2*sin(3*x[3]))
+  φ0 = 1.234
+  lims = ((0.0,1.0), (φ0,φ0), (0.0,1.0))
+  ff = FourierField(fU, lims, (32, 5, 32))  # NG for phi axis is ignored/forced to 1
+
+  @test size(ff.hatvalues, 2) == 1
+  @test ff.k0s[2] == 0.0
+  @test ff.origin[2] == φ0
+
+  x = (0.37, 999.0, 0.62)  # phi entry (999.0) must be irrelevant to the result
+  errs = [abs(real(reconstruct(ff, x, (m, 3, m))) - fU((x[1], φ0, x[3]))) for m in (2, 8, 20)]
+  @test errs[3] < errs[2] < errs[1]
+
+  # passing nonzero maxshells for the degenerate axis must not error, and
+  # must give the same answer as passing 0 explicitly
+  r1 = reconstruct(ff, x, (10, 0, 10))
+  r2 = reconstruct(ff, x, (10, 7, 10))
+  @test isapprox(r1, r2; atol=1e-12)
+
+  # hatvalue only accepts mode 0 on the degenerate axis
+  @test_throws AssertionError hatvalue(ff, (0, 1, 0))
+  @test isfinite(hatvalue(ff, (0, 0, 0)))
+end
+
+@testset "degenerate axis detection helpers" begin
+  lims = ((0.0,1.0), (1.234,1.234), (0.0,1.0))
+  @test degenerateaxes(lims) == (false, true, false)
+  @test isaxisdegenerate(lims, 2)
+  @test !isaxisdegenerate(lims, 1)
 end
 
 @testset "isaxiscontinuous / detectcontinuity" begin
