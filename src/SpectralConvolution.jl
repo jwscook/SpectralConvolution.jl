@@ -136,19 +136,18 @@ end
 prependcolons(x, N) = ntuple(i -> i <= N ? Colon() : x[i - N], length(x) + N)
 
 function hatvalue(ff::FourierField{D}, modes::NTuple{D,<:Integer}) where D
-
   ld = length(size(ff.values)) - D  # leading dimensions
   colons = ntuple(_ -> Colon(), ld)
 
-  Ls = size(ff.hatvalues)   # ACTUAL (per-axis reflected or not) array length
+  Ls = size(ff.hatvalues)[end-D+1:end]   # ACTUAL (per-axis reflected or not) array length
   idx = ntuple(D) do i
-    bin = modes[i]
+    m = modes[i]
     if Ls[i] == 1   # degenerate axis: only the DC mode exists
-      @assert bin == 0 "axis $i is degenerate (zero extent, lims[1]==lims[2]): only mode 0 is defined, got $bin"
+      @assert m == 0 "axis $i is degenerate (zero extent, lims[1]==lims[2]): only mode 0 is defined, got $m"
       return 1
     end
-    @assert abs(bin) <= Ls[i] ÷ 2 - 1 "mode $(modes[i]) on axis $i exceeds the representable Nyquist range of $((Ls[i]÷2 - 1))"
-    fftmodetoindex(bin, Ls[i])
+    @assert abs(m) <= Ls[i] ÷ 2 - 1 "mode $(modes[i]) on axis $i exceeds the representable Nyquist range of $((Ls[i]÷2 - 1))"
+    fftmodetoindex(m, Ls[i])
   end
   return ff.hatvalues[(colons..., idx...)...]
 end
