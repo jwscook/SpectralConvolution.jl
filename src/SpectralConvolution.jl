@@ -5,7 +5,7 @@ export FourierField, hatvalue, reconstruct, convolve, isaxiscontinuous, detectco
 
 fftmodetoindex(m::Integer, N::Integer) = m >= 0 ? m + 1 : N + m + 1
 
-struct FourierField{D,T,U,A<:AbstractArray{T,D},B<:AbstractArray{<:Complex{T},D}}
+struct FourierField{D,T,U,A<:AbstractArray{T},B<:AbstractArray{<:Complex{T}}}
   lims::NTuple{D,NTuple{2,T}}
   NGs::NTuple{D,Int}
   k0s::NTuple{D,U}
@@ -112,24 +112,34 @@ function FourierField(f::F, lims, NGs; continuous=detectcontinuity(f, lims, NGs)
   end
 
   origin = ntuple(i -> trueposition[i][1], D)
-  T = typeof(f(origin))
-  truevalues = Array{T}(undef, NGs...)
+  forigin = f(origin)
+  predims = size(forigin)
+  precolons = ntuple(_ -> Colon(), length(predims))
+
+  truevalues = Array{eltype(forigin)}(undef, predims..., NGs...)
   for ci in CartesianIndices(NGs)
     x = ntuple(i -> trueposition[i][ci[i]], D)
-    truevalues[ci] = f(x)
+    truevalues[precolons..., ci] = f(x)
   end
 
   values = truevalues
   for i in 1:D
     continuous[i] && continue
-    values = cat(values, reverse(values; dims=i); dims=i)
+    j = i + length(predims)
+    values = cat(values, reverse(values; dims=j); dims=j)
   end
   hatvalues = fft(values) ./ prod(size(values))
 
   return FourierField(lims, NGs, k0s, origin, values, hatvalues)
 end
 
+prependcolons(x, N) = ntuple(i -> i <= N ? Colon() : x[i - N], length(x) + N)
+
 function hatvalue(ff::FourierField{D}, modes::NTuple{D,<:Integer}) where D
+
+  ld = length(size(ff.values)) - D  # leading dimensions
+  colons = ntuple(_ -> Colon(), ld)
+
   Ls = size(ff.hatvalues)   # ACTUAL (per-axis reflected or not) array length
   idx = ntuple(D) do i
     bin = modes[i]
@@ -140,7 +150,7 @@ function hatvalue(ff::FourierField{D}, modes::NTuple{D,<:Integer}) where D
     @assert abs(bin) <= Ls[i] ÷ 2 - 1 "mode $(modes[i]) on axis $i exceeds the representable Nyquist range of $((Ls[i]÷2 - 1))"
     fftmodetoindex(bin, Ls[i])
   end
-  return ff.hatvalues[idx...]
+  return ff.hatvalues[(colons..., idx...)...]
 end
 
 function reconstruct(ff::FourierField, x, maxshells; atol=0.0, rtol=sqrt(eps()))
