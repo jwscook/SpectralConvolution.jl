@@ -128,7 +128,8 @@ function FourierField(f::F, lims, NGs; continuous=detectcontinuity(f, lims, NGs)
     j = i + length(predims)
     values = cat(values, reverse(values; dims=j); dims=j)
   end
-  hatvalues = fft(values) ./ prod(size(values))
+  ld = length(predims)
+  hatvalues = fft(values, ld+1:ld+D) ./ prod(size(values)[ld+1:end])
 
   return FourierField(lims, NGs, k0s, origin, values, hatvalues)
 end
@@ -170,8 +171,7 @@ function convolve(ff::FourierField{D}, g::G, x, k, maxshells;
       modes = Tuple(ci)
       maximum(abs.(modes)) == shell || continue
       q = modes .* ff.k0s
-      val = hatvalue(ff, modes) * g(k .- q) * cis(sum(q .* (x .- ff.origin)))
-      shellsum += val
+      shellsum += hatvalue(ff, modes) * g(k .- q) * cis(sum(q .* (x .- ff.origin)))
     end
     output += shellsum
     newnorm = norm(output)
