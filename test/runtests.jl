@@ -72,12 +72,12 @@ end
   # f only depends on x[1] (R) and x[3] (Z); phi (x[2]) axis is degenerate
   fU(x) = sin(2π*x[1]) * (0.3 + 0.5*x[3] + 0.2*sin(3*x[3]))
   φ0 = 1.234
-  lims = ((0.0,1.0), (φ0,φ0), (0.0,1.0))
-  ff = FourierField(fU, lims, (32, 5, 32))  # NG for phi axis is ignored/forced to 1
+  lims = ((0.0,1.0), (0,2π), (0.0,1.0))
+  ff = FourierField(fU, lims, (32, 1, 32))  # NG for phi axis is 1
 
   @test size(ff.hatvalues, 2) == 1
-  @test ff.k0s[2] == 0.0
-  @test ff.origin[2] == φ0
+  @test abs(ff.k0s[2]) == 1
+  @test ff.origin[2] ≈ π # 1 grid point, so half way between 0 and 2π
 
   x = (0.37, 999.0, 0.62)  # phi entry (999.0) must be irrelevant to the result
   errs = [abs(real(reconstruct(ff, x, (m, 3, m))) - fU((x[1], φ0, x[3]))) for m in (2, 8, 20)]
@@ -92,13 +92,6 @@ end
   # hatvalue only accepts mode 0 on the degenerate axis
   @test_throws AssertionError hatvalue(ff, (0, 1, 0))
   @test isfinite(hatvalue(ff, (0, 0, 0)))
-end
-
-@testset "degenerate axis detection helpers" begin
-  lims = ((0.0,1.0), (1.234,1.234), (0.0,1.0))
-  @test degenerateaxes(lims) == (false, true, false)
-  @test isaxisdegenerate(lims, 2)
-  @test !isaxisdegenerate(lims, 1)
 end
 
 @testset "isaxiscontinuous / detectcontinuity" begin
