@@ -103,6 +103,7 @@ function FourierField(f::F, lims, NGs; continuous=detectcontinuity(f, lims, NGs)
   continuous = ntuple(i -> isone(NGs[i]) ? true : continuous[i], D)  # never reflect/double a degenerate axis
   @assert length(NGs) == D
   @assert length(continuous) == D
+
   k0s = ntuple(i -> (continuous[i] ? 2π : π) / (lims[i][2] - lims[i][1]), D)
   @assert all(isfinite, k0s)
 
@@ -130,6 +131,12 @@ function FourierField(f::F, lims, NGs; continuous=detectcontinuity(f, lims, NGs)
   end
   ld = length(predims)
   hatvalues = fft(values, ld+1:ld+D) ./ prod(size(values)[ld+1:end])
+
+  hatsizes = ntuple(i -> size(hatvalues, i + ld), D)
+  ci = CartesianIndices(hatsizes)
+  for (i, m) in enumerate(Iterators.product((fftfreq(hatsizes[i], hatsizes[i]) for i in 1:D)...))
+    hatvalues[precolons..., Tuple(ci[i])...] *= cis(-sum(m .* k0s .* origin))
+  end
 
   return FourierField(lims, NGs, k0s, origin, values, hatvalues)
 end
@@ -161,8 +168,9 @@ function convolve(ff::FourierField{D}, g::G, x, k, maxshells;
     atol=0.0, rtol=sqrt(eps())) where {D,G}
   length(x) == D || error("x must have length $D")
   length(maxshells) == D || error("maxshells must have length $D")
+
   maxshells = ntuple(i -> isone(ff.NGs[i]) ? 0 : maxshells[i], D)  # a degenerate axis only ever has mode 0
-  output = hatvalue(ff, ntuple(_ -> 0, D)) * g(k)
+  output = hatvalue(ff, ntuple(_ -> 0, D)) * g(k) # q = 0
   oldnorm = norm(output)
   for shell in 1:maximum(maxshells)
     smax = ntuple(i -> min(shell, maxshells[i]), D)
@@ -171,8 +179,9 @@ function convolve(ff::FourierField{D}, g::G, x, k, maxshells;
       modes = Tuple(ci)
       maximum(abs.(modes)) == shell || continue
       q = modes .* ff.k0s
-      shellsum += hatvalue(ff, modes) * g(k .- q) * cis(sum(q .* (x .- ff.origin)))
+      shellsum += hatvalue(ff, modes) * g(k .- q) * cis(sum(q .* x))
     end
+
     output += shellsum
     newnorm = norm(output)
     isapprox(newnorm, oldnorm; atol=atol, rtol=rtol) && break
